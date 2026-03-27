@@ -667,6 +667,19 @@ require('lazy').setup({
       'saghen/blink.cmp',
     },
     config = function()
+      local blink = require 'blink.cmp'
+      local lsp_capabilities = blink.get_lsp_capabilities()
+      local vue_language_server_path = vim.fn.expand '$MASON/packages/vue-language-server/node_modules/@vue/language-server'
+      if vue_language_server_path:find('^%$MASON') then
+        vue_language_server_path = vim.fn.stdpath 'data' .. '/mason/packages/vue-language-server/node_modules/@vue/language-server'
+      end
+      local vue_plugin = {
+        name = '@vue/typescript-plugin',
+        location = vue_language_server_path,
+        languages = { 'vue' },
+        configNamespace = 'typescript',
+      }
+
       -- Brief aside: **What is LSP?**
       --
       -- LSP is an initialism you've probably heard, but might not understand what it is.
@@ -768,7 +781,22 @@ require('lazy').setup({
         -- clangd = {},
         gopls = {},
         pyright = {},
+        vtsls = {
+          filetypes = { 'javascript', 'javascriptreact', 'typescript', 'typescriptreact', 'vue' },
+          on_attach = function(client)
+            client.server_capabilities.documentFormattingProvider = false
+            client.server_capabilities.documentRangeFormattingProvider = false
+          end,
+          settings = {
+            vtsls = {
+              tsserver = {
+                globalPlugins = { vue_plugin },
+              },
+            },
+          },
+        },
         vue_ls = {
+          capabilities = lsp_capabilities,
           filetypes = { 'vue' },
         },
 
@@ -780,8 +808,6 @@ require('lazy').setup({
         --
         -- But for many setups, the LSP (`ts_ls`) will work just fine
         -- ts_ls = {},
-
-        stylua = {}, -- Used to format Lua code
 
         -- Special Lua Config, as recommended by neovim help docs
         lua_ls = {
@@ -813,6 +839,10 @@ require('lazy').setup({
         },
       }
 
+      for _, server in pairs(servers) do
+        server.capabilities = vim.tbl_deep_extend('force', {}, lsp_capabilities, server.capabilities or {})
+      end
+
       -- Ensure the servers and tools above are installed
       --
       -- To check the current status of installed tools and/or manually install
@@ -823,7 +853,7 @@ require('lazy').setup({
       local ensure_installed = vim.tbl_keys(servers or {})
       vim.list_extend(ensure_installed, {
         -- You can add other tools here that you want Mason to install
-        'ts_ls',
+        'stylua',
         'prettier',
       })
 
@@ -833,15 +863,6 @@ require('lazy').setup({
         vim.lsp.config(name, server)
         vim.lsp.enable(name)
       end
-
-      require('mason-lspconfig').setup_handlers {
-        -- default setup for all servers (without a key)
-        function(server_name) require('lspconfig')[server_name].setup {} end,
-        -- LSP specific handlers
-        ['ts_ls'] = function()
-          -- do nothing, managed by typescript-tools
-        end,
-      }
     end,
   },
 
@@ -984,32 +1005,6 @@ require('lazy').setup({
       -- Shows a signature help window while you type arguments for a function
       signature = { enabled = true },
     },
-  },
-
-  -- Typescript-tools for typescript and vue support
-  {
-    'pmizio/typescript-tools.nvim',
-    dependencies = { 'nvim-lua/plenary.nvim', 'neovim/nvim-lspconfig' },
-    opts = {},
-    ft = { 'javascript', 'javascriptreact', 'typescript', 'typescriptreact', 'vue' },
-
-    config = function()
-      require('typescript-tools').setup {
-        on_attach = function(client, bufnr)
-          client.server_capabilities.documentFormattingProvider = false
-          client.server_capabilities.documentRangeFormattingProvider = false
-        end,
-
-        filetypes = { 'javascript', 'javascriptreact', 'typescript', 'typescriptreact', 'vue' },
-        settings = {
-          tsserver_plugins = { '@vue/typescript-plugin' },
-          jsx_close_tag = {
-            enable = true,
-            filetypes = { 'javascriptreact', 'typescriptreact' },
-          },
-        },
-      }
-    end,
   },
 
   { -- You can easily change to a different colorscheme.
