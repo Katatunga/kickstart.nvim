@@ -88,10 +88,10 @@ P.S. You can delete this when you're done too. It's your config now! :)
 -- See `:help mapleader`
 --  NOTE: Must happen before plugins are loaded (otherwise wrong leader will be used)
 vim.g.mapleader = ' '
-vim.g.maplocalleader = ' '
+vim.g.maplocalleader = ','
 
 -- Set to true if you have a Nerd Font installed and selected in the terminal
-vim.g.have_nerd_font = false
+vim.g.have_nerd_font = true
 
 -- [[ Setting options ]]
 -- See `:help vim.o`
@@ -102,7 +102,7 @@ vim.g.have_nerd_font = false
 vim.o.number = true
 -- You can also add relative line numbers, to help with jumping.
 --  Experiment for yourself to see if you like it!
--- vim.o.relativenumber = true
+vim.o.relativenumber = true
 
 -- Enable mouse mode, can be useful for resizing splits for example!
 vim.o.mouse = 'a'
@@ -138,6 +138,9 @@ vim.o.timeoutlen = 300
 -- Configure how new splits should be opened
 vim.o.splitright = true
 vim.o.splitbelow = true
+
+-- Set tabstop to 4 (might be overridden by language specifics)
+vim.o.tabstop = 4
 
 -- Sets how neovim will display certain whitespace characters in the editor.
 --  See `:help 'list'`
@@ -189,6 +192,17 @@ vim.diagnostic.config {
 
 vim.keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Open diagnostic [Q]uickfix list' })
 
+-- [[ Terminal ]]
+
+-- Open terminal in the working directory
+vim.keymap.set('n', '<leader>gtt', function() vim.cmd 'terminal' end, { desc = 'Open in working directory' })
+
+-- Open the terminal in the directory of the current file
+vim.keymap.set('n', '<leader>gtc', function()
+  vim.cmd 'lcd %:p:h'
+  vim.cmd 'terminal'
+end, { desc = 'Open in current directory' })
+
 -- Exit terminal mode in the builtin terminal with a shortcut that is a bit easier
 -- for people to discover. Otherwise, you normally need to press <C-\><C-n>, which
 -- is not what someone will guess without a bit more experience.
@@ -228,6 +242,19 @@ vim.api.nvim_create_autocmd('TextYankPost', {
   desc = 'Highlight when yanking (copying) text',
   group = vim.api.nvim_create_augroup('kickstart-highlight-yank', { clear = true }),
   callback = function() vim.hl.on_yank() end,
+})
+
+-- [[ Autocommand for mini.files ]]
+-- display relative line numbers in the buffers of mini as well
+vim.api.nvim_create_autocmd('User', {
+  pattern = { 'MiniFilesWindowOpen', 'MiniFilesWindowUpdate' },
+  callback = function(args)
+    local win_id = args.data.win_id
+    if win_id and vim.api.nvim_win_is_valid(win_id) then
+      vim.wo[win_id].number = true
+      vim.wo[win_id].relativenumber = true
+    end
+  end,
 })
 
 -- [[ Install `lazy.nvim` plugin manager ]]
@@ -273,6 +300,8 @@ require('lazy').setup({
   -- options to `gitsigns.nvim`.
   --
   -- See `:help gitsigns` to understand what the configuration keys do
+
+  -- 1) Inline hunks / blame / stage partials
   { -- Adds git related signs to the gutter, as well as utilities for managing changes
     'lewis6991/gitsigns.nvim',
     ---@module 'gitsigns'
@@ -286,7 +315,111 @@ require('lazy').setup({
         topdelete = { text = '‾' }, ---@diagnostic disable-line: missing-fields
         changedelete = { text = '~' }, ---@diagnostic disable-line: missing-fields
       },
+      signcolumn = true,
+      current_line_blame = false, -- toggle with keymap below
+      on_attach = function(bufnr)
+        local gs = package.loaded.gitsigns
+        local function map(mode, l, r, desc) vim.keymap.set(mode, l, r, { buffer = bufnr, desc = desc }) end
+
+        map('n', ']c', function()
+          if vim.wo.diff then return ']c' end
+          vim.schedule(gs.next_hunk)
+          return '<Ignore>'
+        end, 'Next git hunk')
+
+        map('n', '[c', function()
+          if vim.wo.diff then return '[c' end
+          vim.schedule(gs.prev_hunk)
+          return '<Ignore>'
+        end, 'Prev git hunk')
+
+        map({ 'n', 'v' }, '<leader>hs', ':Gitsigns stage_hunk<CR>', 'Stage hunk')
+        map({ 'n', 'v' }, '<leader>hr', ':Gitsigns reset_hunk<CR>', 'Reset hunk')
+        map('n', '<leader>hS', gs.stage_buffer, 'Stage buffer')
+        map('n', '<leader>hu', gs.undo_stage_hunk, 'Undo stage hunk')
+        map('n', '<leader>hR', gs.reset_buffer, 'Reset buffer')
+        map('n', '<leader>hp', gs.preview_hunk, 'Preview hunk')
+        map('n', '<leader>hb', gs.toggle_current_line_blame, 'Toggle line blame')
+        map('n', '<leader>hd', gs.diffthis, 'Diff this')
+      end,
     },
+  },
+
+  -- 2) Magit-like Git UI (status, commit, branches, etc.)
+  {
+    'NeogitOrg/neogit',
+    cmd = 'Neogit',
+    dependencies = {
+      'nvim-lua/plenary.nvim',
+      'sindrets/diffview.nvim', -- integrates nicely
+      'nvim-telescope/telescope.nvim', -- optional but nice
+    },
+    opts = {
+      -- If you like Neogit to use Diffview for diffs:
+      integrations = { diffview = true },
+    },
+    keys = {
+      { '<leader>gug', '<cmd>Neogit<CR>', desc = 'Neogit' },
+    },
+  },
+
+  -- 3) Diffs + file history
+  {
+    'sindrets/diffview.nvim',
+    cmd = { 'DiffviewOpen', 'DiffviewFileHistory', 'DiffviewClose' },
+    keys = {
+      { '<leader>gh', '<cmd>DiffviewFileHistory %<CR>', desc = 'File history (current file)' },
+      { '<leader>gH', '<cmd>DiffviewFileHistory<CR>', desc = 'Repo history' },
+    },
+    opts = {},
+  },
+
+  -- Github integration (mainly for PRs)
+  {
+    'pwntester/octo.nvim',
+    cmd = 'Octo',
+    dependencies = {
+      'nvim-lua/plenary.nvim',
+      'nvim-telescope/telescope.nvim',
+      -- Optional but nice (icons):
+      'nvim-tree/nvim-web-devicons',
+    },
+    opts = {
+      -- Octo works best with these defaults; tweak as you like.
+      use_local_fs = false, -- uses gh api; set true if you prefer local clones
+      enable_builtin = false, -- you already have diffview/neogit/gitsigns
+      default_remote = { 'upstream', 'origin' },
+      users = 'mentionable',
+
+      -- Pick your review “style”
+      -- "local" = uses local checkout; "remote" = uses GitHub PR files API
+      -- If you're mostly reviewing PRs without checking them out, keep "remote".
+      picker = 'telescope',
+    },
+    keys = {
+      -- PRs
+      { '<leader>op', '<cmd>Octo pr list<CR>', desc = 'Octo: PR list' },
+      { '<leader>oP', '<cmd>Octo pr search<CR>', desc = 'Octo: PR search' },
+      { '<leader>oc', '<cmd>Octo pr create<CR>', desc = 'Octo: PR create' },
+      { '<leader>os', '<cmd>Octo review start<CR>', desc = 'Octo: Start review' },
+      { '<leader>oS', '<cmd>Octo review submit<CR>', desc = 'Octo: Submit review' },
+      { '<leader>or', '<cmd>Octo review resume<CR>', desc = 'Octo: Resume review' },
+
+      -- Issues (handy, even if you mainly do PRs)
+      { '<leader>oi', '<cmd>Octo issue list<CR>', desc = 'Octo: Issue list' },
+
+      -- Convenience: open current PR in browser (requires you're in a PR buffer / repo)
+      { '<leader>ob', '<cmd>Octo browse<CR>', desc = 'Octo: Browse (open in web)' },
+
+      -- See pending comments of the current PR
+      { '<localleader>cr', '<cmd>Octo review comments<CR>', desc = 'Octo: See pending comments' },
+    },
+    config = function(_, opts)
+      require('octo').setup(opts)
+
+      -- Optional: ensure telescope extension loads (not always necessary)
+      pcall(function() require('telescope').load_extension 'octo' end)
+    end,
   },
 
   -- NOTE: Plugins can also be configured to run Lua code when they are loaded.
@@ -319,6 +452,19 @@ require('lazy').setup({
         { '<leader>s', group = '[S]earch', mode = { 'n', 'v' } },
         { '<leader>t', group = '[T]oggle' },
         { '<leader>h', group = 'Git [H]unk', mode = { 'n', 'v' } },
+        { '<leader>f', group = '[F]iles', mode = { 'n', 'v' } },
+        { '<leader>m', group = '[M]ove', mode = { 'n', 'v' } },
+        { '<leader>o', group = '[O]cto', mode = { 'n', 'v' } },
+        { '<leader>gt', group = '[T]erminal', mode = { 'n', 'v' } },
+        { '<leader>gl', group = '[L]atest Tag', mode = { 'n', 'v' } },
+        { '<leader>gu', group = '[U]Is', mode = { 'n', 'v' } },
+        { '<leader>c', group = '[C]opy', mode = { 'n', 'v' } },
+
+        -- Buffers
+        { '<leader>b', group = '[B]uffer', mode = { 'n', 'v' } },
+        { '<leader>bt', group = 'Set File[T]ype', mode = { 'n', 'v' } },
+        { '<leader>bd', group = '[D]elete', mode = { 'n', 'v' } },
+
         { 'gr', group = 'LSP Actions', mode = { 'n' } },
       },
     },
@@ -408,6 +554,7 @@ require('lazy').setup({
       vim.keymap.set('n', '<leader>sh', builtin.help_tags, { desc = '[S]earch [H]elp' })
       vim.keymap.set('n', '<leader>sk', builtin.keymaps, { desc = '[S]earch [K]eymaps' })
       vim.keymap.set('n', '<leader>sf', builtin.find_files, { desc = '[S]earch [F]iles' })
+      vim.keymap.set('n', '<leader>sa', function() builtin.find_files { hidden = true, no_ignore = true } end, { desc = '[S]earch [A]ll Files' })
       vim.keymap.set('n', '<leader>ss', builtin.builtin, { desc = '[S]earch [S]elect Telescope' })
       vim.keymap.set({ 'n', 'v' }, '<leader>sw', builtin.grep_string, { desc = '[S]earch current [W]ord' })
       vim.keymap.set('n', '<leader>sg', builtin.live_grep, { desc = '[S]earch by [G]rep' })
@@ -415,7 +562,22 @@ require('lazy').setup({
       vim.keymap.set('n', '<leader>sr', builtin.resume, { desc = '[S]earch [R]esume' })
       vim.keymap.set('n', '<leader>s.', builtin.oldfiles, { desc = '[S]earch Recent Files ("." for repeat)' })
       vim.keymap.set('n', '<leader>sc', builtin.commands, { desc = '[S]earch [C]ommands' })
-      vim.keymap.set('n', '<leader><leader>', builtin.buffers, { desc = '[ ] Find existing buffers' })
+      vim.keymap.set('n', '<leader><leader>', function() builtin.buffers({
+        sort_mru = true,
+        ignore_current_buffer = true,
+      }) end, { desc = '[ ] Find existing buffers' })
+      vim.keymap.set(
+        'n',
+        '<leader>sF',
+        function()
+          builtin.grep_string {
+            search = vim.fn.expand '%:t',
+            prompt_title = 'Grep current filename',
+          }
+        end,
+        { desc = 'Search for current filename' }
+      )
+      vim.keymap.set('n', '<leader>sq', '<cmd>Telescope quickfixhistory<cr>', { desc = 'Quickfix history' })
 
       -- This runs on LSP attach per buffer (see main LSP attach function in 'neovim/nvim-lspconfig' config for more info,
       -- it is better explained there). This allows easily switching between pickers if you prefer using something else!
@@ -604,8 +766,13 @@ require('lazy').setup({
       ---@type table<string, vim.lsp.Config>
       local servers = {
         -- clangd = {},
-        -- gopls = {},
-        -- pyright = {},
+        gopls = {},
+        pyright = {},
+        vue_ls = {
+          filetypes = { 'vue' },
+        },
+
+        jsonls = {},
         -- rust_analyzer = {},
         --
         -- Some languages (like typescript) have entire language plugins that can be useful:
@@ -656,6 +823,8 @@ require('lazy').setup({
       local ensure_installed = vim.tbl_keys(servers or {})
       vim.list_extend(ensure_installed, {
         -- You can add other tools here that you want Mason to install
+        'ts_ls',
+        'prettier',
       })
 
       require('mason-tool-installer').setup { ensure_installed = ensure_installed }
@@ -664,6 +833,15 @@ require('lazy').setup({
         vim.lsp.config(name, server)
         vim.lsp.enable(name)
       end
+
+      require('mason-lspconfig').setup_handlers {
+        -- default setup for all servers (without a key)
+        function(server_name) require('lspconfig')[server_name].setup {} end,
+        -- LSP specific handlers
+        ['ts_ls'] = function()
+          -- do nothing, managed by typescript-tools
+        end,
+      }
     end,
   },
 
@@ -673,7 +851,7 @@ require('lazy').setup({
     cmd = { 'ConformInfo' },
     keys = {
       {
-        '<leader>f',
+        '<leader>bf',
         function() require('conform').format { async = true, lsp_format = 'fallback' } end,
         mode = '',
         desc = '[F]ormat buffer',
@@ -683,22 +861,29 @@ require('lazy').setup({
     ---@type conform.setupOpts
     opts = {
       notify_on_error = false,
-      format_on_save = function(bufnr)
-        -- Disable "format_on_save lsp_fallback" for languages that don't
-        -- have a well standardized coding style. You can add additional
-        -- languages here or re-enable it for the disabled ones.
-        local disable_filetypes = { c = true, cpp = true }
-        if disable_filetypes[vim.bo[bufnr].filetype] then
-          return nil
-        else
-          return {
-            timeout_ms = 500,
-            lsp_format = 'fallback',
-          }
-        end
-      end,
+      format_on_save = false,
+      -- format_on_save = function(bufnr)
+      --   -- Disable "format_on_save lsp_fallback" for languages that don't
+      --   -- have a well standardized coding style. You can add additional
+      --   -- languages here or re-enable it for the disabled ones.
+      --   local disable_filetypes = { c = true, cpp = true }
+      --   if disable_filetypes[vim.bo[bufnr].filetype] then
+      --     return nil
+      --   else
+      --     return {
+      --       timeout_ms = 500,
+      --       lsp_format = 'fallback',
+      --     }
+      --   end
+      -- end,
       formatters_by_ft = {
         lua = { 'stylua' },
+        javascript = { 'prettier' },
+        typescript = { 'prettier' },
+        html = { 'prettier' },
+        css = { 'prettier' },
+        json = { 'prettier' },
+        vue = { 'prettier' },
         -- Conform can also run multiple formatters sequentially
         -- python = { "isort", "black" },
         --
@@ -801,6 +986,32 @@ require('lazy').setup({
     },
   },
 
+  -- Typescript-tools for typescript and vue support
+  {
+    'pmizio/typescript-tools.nvim',
+    dependencies = { 'nvim-lua/plenary.nvim', 'neovim/nvim-lspconfig' },
+    opts = {},
+    ft = { 'javascript', 'javascriptreact', 'typescript', 'typescriptreact', 'vue' },
+
+    config = function()
+      require('typescript-tools').setup {
+        on_attach = function(client, bufnr)
+          client.server_capabilities.documentFormattingProvider = false
+          client.server_capabilities.documentRangeFormattingProvider = false
+        end,
+
+        filetypes = { 'javascript', 'javascriptreact', 'typescript', 'typescriptreact', 'vue' },
+        settings = {
+          tsserver_plugins = { '@vue/typescript-plugin' },
+          jsx_close_tag = {
+            enable = true,
+            filetypes = { 'javascriptreact', 'typescriptreact' },
+          },
+        },
+      }
+    end,
+  },
+
   { -- You can easily change to a different colorscheme.
     -- Change the name of the colorscheme plugin below, and then
     -- change the command in the config to whatever the name of that colorscheme is.
@@ -852,6 +1063,18 @@ require('lazy').setup({
       -- - sr)'  - [S]urround [R]eplace [)] [']
       require('mini.surround').setup()
 
+      -- file tree that behaves like a buffer
+      require('mini.files').setup()
+
+      local MiniFiles = require 'mini.files'
+
+      vim.keymap.set('n', '<leader>ff', function()
+        MiniFiles.open(vim.api.nvim_buf_get_name(0))
+        MiniFiles.reveal_cwd()
+      end, { desc = 'Current [F]ile in directory' })
+
+      vim.keymap.set('n', '<leader>fF', function() MiniFiles.open(nil, false) end, { desc = 'Git root in directory' })
+
       -- Simple and easy statusline.
       --  You could remove this setup call if you don't like it,
       --  and try some other statusline plugin
@@ -870,39 +1093,259 @@ require('lazy').setup({
     end,
   },
 
-  { -- Highlight, edit, and navigate code
+  {
     'nvim-treesitter/nvim-treesitter',
     lazy = false,
     build = ':TSUpdate',
-    branch = 'main',
-    -- [[ Configure Treesitter ]] See `:help nvim-treesitter-intro`
     config = function()
-      local parsers = { 'bash', 'c', 'diff', 'html', 'lua', 'luadoc', 'markdown', 'markdown_inline', 'query', 'vim', 'vimdoc' }
-      require('nvim-treesitter').install(parsers)
+      local ts = require 'nvim-treesitter'
+      local parsers = {
+        'bash',
+        'comment',
+        'css',
+        'diff',
+        'dockerfile',
+        'elixir',
+        'git_config',
+        'gitcommit',
+        'gitignore',
+        'groovy',
+        'go',
+        'heex',
+        'hcl',
+        'html',
+        'http',
+        'java',
+        'javascript',
+        'jsdoc',
+        'json',
+        'json5',
+        'lua',
+        'make',
+        'markdown',
+        'markdown_inline',
+        'python',
+        'regex',
+        'rst',
+        'rust',
+        'scss',
+        'ssh_config',
+        'sql',
+        'terraform',
+        'typst',
+        'toml',
+        'tsx',
+        'typescript',
+        'vim',
+        'vimdoc',
+        'vue',
+        'yaml',
+      }
+
+      for _, parser in ipairs(parsers) do
+        ts.install(parser)
+      end
+
+      -- Not every tree-sitter parser is the same as the file type detected
+      -- So the patterns need to be registered more cleverly
+      local patterns = {}
+      for _, parser in ipairs(parsers) do
+        local parser_patterns = vim.treesitter.language.get_filetypes(parser)
+        for _, pp in pairs(parser_patterns) do
+          table.insert(patterns, pp)
+        end
+      end
+
+      -- vim.treesitter.language.register('groovy', 'Jenkinsfile')
+      -- vim.wo[0][0].foldexpr = 'v:lua.vim.treesitter.foldexpr()'
+      -- vim.wo[0][0].foldmethod = 'expr'
+
       vim.api.nvim_create_autocmd('FileType', {
-        callback = function(args)
-          local buf, filetype = args.buf, args.match
-
-          local language = vim.treesitter.language.get_lang(filetype)
-          if not language then return end
-
-          -- check if parser exists and load it
-          if not vim.treesitter.language.add(language) then return end
-          -- enables syntax highlighting and other treesitter features
-          vim.treesitter.start(buf, language)
-
-          -- enables treesitter based folds
-          -- for more info on folds see `:help folds`
-          -- vim.wo.foldexpr = 'v:lua.vim.treesitter.foldexpr()'
-          -- vim.wo.foldmethod = 'expr'
-
-          -- enables treesitter based indentation
-          vim.bo.indentexpr = "v:lua.require'nvim-treesitter'.indentexpr()"
-        end,
+        pattern = patterns,
+        callback = function() vim.treesitter.start() end,
       })
     end,
   },
 
+  {
+    'nvim-treesitter/nvim-treesitter-textobjects',
+    branch = 'main',
+    dependencies = { 'nvim-treesitter/nvim-treesitter', branch = 'main' },
+    init = function() vim.g.no_plugin_maps = true end,
+    config = function()
+      require('nvim-treesitter-textobjects').setup {
+        select = {
+          -- Automatically jump forward to textobj, similar to targets.vim
+          lookahead = true,
+          -- You can choose the select mode (default is charwise 'v')
+
+          selection_modes = {
+            ['@parameter.outer'] = 'v', -- charwise
+            ['@function.outer'] = 'V', -- linewise
+            ['@class.outer'] = '<c-v>', -- blockwise
+          },
+          include_surrounding_whitespace = false,
+        },
+        move = {
+          -- whether to set jumps in the jumplist
+          set_jumps = true,
+        },
+      }
+
+      -- Selects
+      local select = require 'nvim-treesitter-textobjects.select'
+      vim.keymap.set({ 'x', 'o' }, 'af', function() select.select_textobject('@function.outer', 'textobjects') end, { desc = '[A]round [F]unction' })
+      vim.keymap.set({ 'x', 'o' }, 'if', function() select.select_textobject('@function.inner', 'textobjects') end, { desc = '[I]nside [F]unction' })
+      vim.keymap.set({ 'x', 'o' }, 'ac', function() select.select_textobject('@class.outer', 'textobjects') end, { desc = '[A]round [C]lass' })
+      vim.keymap.set({ 'x', 'o' }, 'ic', function() select.select_textobject('@class.inner', 'textobjects') end, { desc = '[I]nside [C]lass' })
+      -- You can also use captures from other query groups like `locals.scm`
+      vim.keymap.set({ 'x', 'o' }, 'as', function() select.select_textobject('@local.scope', 'locals') end, { desc = '[A]round local [S]cope' })
+
+      -- Swaps
+      local swap = require 'nvim-treesitter-textobjects.swap'
+      vim.keymap.set('n', '<leader>mp', function() swap.swap_next '@parameter.inner' end, { desc = '[M]ove [P]arameter right' })
+      vim.keymap.set('n', '<leader>mP', function() swap.swap_previous '@parameter.inner' end, { desc = '[M]ove [P]arameter left' })
+
+      local move = require 'nvim-treesitter-textobjects.move'
+      vim.keymap.set({ 'n', 'x', 'o' }, ']f', function() move.goto_next_start('@function.outer', 'textobjects') end, { desc = 'Go to next function' })
+      vim.keymap.set({ 'n', 'x', 'o' }, ']]', function() move.goto_next_start('@class.outer', 'textobjects') end, { desc = 'Go to next class' })
+      -- You can also pass a list to group multiple queries.
+      vim.keymap.set(
+        { 'n', 'x', 'o' },
+        ']o',
+        function() move.goto_next_start({ '@loop.inner', '@loop.outer' }, 'textobjects') end,
+        { desc = 'Go to next loop' }
+      )
+      -- You can also use captures from other query groups like `locals.scm` or `folds.scm`
+      vim.keymap.set({ 'n', 'x', 'o' }, ']s', function() move.goto_next_start('@local.scope', 'locals') end, { desc = 'Go to next scope' })
+      vim.keymap.set({ 'n', 'x', 'o' }, ']z', function() move.goto_next_start('@fold', 'folds') end, { desc = 'Go to next fold' })
+
+      vim.keymap.set({ 'n', 'x', 'o' }, ']F', function() move.goto_next_end('@function.outer', 'textobjects') end, { desc = 'Go to next end of function' })
+      vim.keymap.set({ 'n', 'x', 'o' }, '][', function() move.goto_next_end('@class.outer', 'textobjects') end, { desc = 'Go to next end of class' })
+
+      vim.keymap.set({ 'n', 'x', 'o' }, '[f', function() move.goto_previous_start('@function.outer', 'textobjects') end, { desc = 'Go to previous function' })
+      vim.keymap.set({ 'n', 'x', 'o' }, '[[', function() move.goto_previous_start('@class.outer', 'textobjects') end, { desc = 'Go to prevous class' })
+
+      vim.keymap.set(
+        { 'n', 'x', 'o' },
+        '[F',
+        function() move.goto_previous_end('@function.outer', 'textobjects') end,
+        { desc = 'Go to end of previous function' }
+      )
+      vim.keymap.set({ 'n', 'x', 'o' }, '[]', function() move.goto_previous_end('@class.outer', 'textobjects') end, { desc = 'Go to end of previous class' })
+
+      -- Go to either the start or the end, whichever is closer.
+      -- Use if you want more granular movements
+      vim.keymap.set({ 'n', 'x', 'o' }, ']d', function() move.goto_next('@conditional.outer', 'textobjects') end, { desc = 'Go to next conditional' })
+      vim.keymap.set({ 'n', 'x', 'o' }, '[d', function() move.goto_previous('@conditional.outer', 'textobjects') end, { desc = 'Go to previous conditional' })
+    end,
+  },
+
+  {
+    'AndrewRadev/switch.vim',
+    keys = { { '-', '<cmd>Switch<cr>' } },
+  },
+
+  {
+    'selimacerbas/markdown-preview.nvim',
+    dependencies = { 'selimacerbas/live-server.nvim' },
+    opts = {},
+    keys = {
+      { '<leader>gum', '<cmd>MarkdownPreview<CR>', desc = 'Markdown Preview' },
+      { '<leader>guM', '<cmd>MarkdownPreviewStop<CR>', desc = 'Stop Markdown Preview' },
+    },
+  },
+
+  {
+    'yochem/jq-playground.nvim',
+    keys = {
+      { '<leader>guj', '<cmd>JqPlayground<CR>', desc = 'jq playground' },
+    },
+  },
+
+  {
+    'mfussenegger/nvim-dap',
+    dependencies = {
+      {
+        'leoluz/nvim-dap-go',
+        ft = 'go',
+        config = function() require('dap-go').setup() end,
+      },
+    },
+    config = function()
+      local dap = require 'dap'
+
+      -- Optional signs
+      vim.fn.sign_define('DapBreakpoint', {
+        text = '●',
+        texthl = 'DiagnosticError',
+        linehl = '',
+        numhl = '',
+      })
+
+      vim.fn.sign_define('DapStopped', {
+        text = '▶',
+        texthl = 'DiagnosticWarn',
+        linehl = 'Visual',
+        numhl = 'DiagnosticWarn',
+      })
+
+      local dapgo = require 'dap-go'
+      dapgo.setup {
+        dap_configurations = {
+          {
+            type = 'go',
+            name = 'Attach to Go in Docker',
+            request = 'attach',
+            mode = 'remote',
+            host = '127.0.0.1',
+            port = 2345,
+            cwd = vim.fn.getcwd() .. '/Backend',
+            substitutePath = {
+              {
+                from = vim.fn.getcwd() .. '/Backend',
+                to = '/app',
+              },
+            },
+          },
+        },
+      }
+      -- Basic keymaps
+      vim.keymap.set('n', '<F5>', dap.continue, { desc = 'DAP Continue' })
+      vim.keymap.set('n', '<F10>', dap.step_over, { desc = 'DAP Step Over' })
+      vim.keymap.set('n', '<F11>', dap.step_into, { desc = 'DAP Step Into' })
+      vim.keymap.set('n', '<F12>', dap.step_out, { desc = 'DAP Step Out' })
+      vim.keymap.set('n', '<Leader>tb', dap.toggle_breakpoint, { desc = 'DAP Toggle Breakpoint' })
+      vim.keymap.set('n', '<Leader>tB', function() dap.set_breakpoint(vim.fn.input 'Breakpoint condition: ') end, { desc = 'DAP Conditional Breakpoint' })
+      vim.keymap.set('n', '<Leader>dr', dap.repl.open, { desc = 'DAP Open REPL' })
+      vim.keymap.set('n', '<Leader>dl', dap.run_last, { desc = 'DAP Run Last' })
+    end,
+  },
+
+  {
+    'rcarriga/nvim-dap-ui',
+    dependencies = { 'mfussenegger/nvim-dap', 'nvim-neotest/nvim-nio' },
+    config = function()
+      local dapui = require 'dapui'
+      dapui.setup()
+
+      vim.keymap.set('n', '<leader>guw', dapui.open, { desc = 'Open DAP UI' })
+      vim.keymap.set('n', '<leader>guW', dapui.close, { desc = 'Close DAP UI' })
+    end,
+  },
+
+  {
+    'folke/lazydev.nvim',
+    ft = 'lua', -- only load on lua files
+    opts = {
+      library = {
+        { 'nvim-dap-ui' },
+        -- See the configuration section for more details
+        -- Load luvit types when the `vim.uv` word is found
+        -- { path = "${3rd}/luv/library", words = { "vim%.uv" } },
+      },
+    },
+  },
   -- The following comments only work if you have downloaded the kickstart repo, not just copy pasted the
   -- init.lua. If you want these files, they are in the repository, so you can just download them and
   -- place them in the correct locations.
@@ -950,6 +1393,91 @@ require('lazy').setup({
     },
   },
 })
+
+-- User defined programs
+
+-- [[ Git Tags getters ]]
+local function run_cmd(cmd)
+  local handle = io.popen(cmd)
+  if not handle then
+    vim.notify('Failed to run command', vim.log.levels.ERROR)
+    return
+  end
+
+  local result = handle:read('*a'):gsub('%s+$', '')
+  handle:close()
+
+  if result == '' then
+    vim.notify('No tag found', vim.log.levels.WARN)
+  else
+    vim.notify(result, vim.log.levels.INFO)
+  end
+end
+
+-- Latest tag in repository
+vim.api.nvim_create_user_command('GitLatestTag', function() run_cmd 'git tag --sort=-v:refname | head -n 1' end, {})
+
+-- Latest tag reachable from current branch
+vim.api.nvim_create_user_command('GitLatestTagBranch', function() run_cmd 'git describe --tags --abbrev=0' end, {})
+
+vim.keymap.set('n', '<leader>gll', '<cmd>GitLatestTag<CR>', { desc = '[L]atest overall' })
+vim.keymap.set('n', '<leader>glb', '<cmd>GitLatestTagBranch<CR>', { desc = 'Latest on [B]ranch' })
+
+-- [[ copy the line reference to the git root ]]
+vim.keymap.set('n', '<leader>cy', function()
+  local ref = vim.fn.expand '%:.' .. ':' .. vim.fn.line '.'
+  vim.fn.setreg('+', ref)
+  print('Copied: ' .. ref)
+end, { desc = 'Copy line reference' })
+
+-- Rename current quick fix list with local leader
+vim.api.nvim_create_autocmd('FileType', {
+  pattern = 'qf',
+  callback = function(ev)
+    vim.keymap.set('n', '<localleader>r', function()
+      local info = vim.fn.getqflist { title = 0 }
+      local title = vim.fn.input('Quickfix title: ', info.title)
+      if title ~= '' then vim.fn.setqflist({}, 'a', { title = title }) end
+    end, { buffer = ev.buf, desc = 'Rename quickfix list' })
+  end,
+})
+
+-- [[ Buffer manipulation ]]
+-- Quick filetype setters
+local function set_ft(ft)
+  vim.bo.filetype = ft
+  print('filetype -> ' .. ft)
+end
+
+vim.keymap.set('n', '<leader>btj', function() set_ft 'json' end, { desc = '[J]son' })
+
+vim.keymap.set('n', '<leader>btt', function() set_ft 'typescript' end, { desc = '[T]ypescript' })
+
+vim.keymap.set('n', '<leader>btg', function() set_ft 'go' end, { desc = '[G]o' })
+
+vim.keymap.set('n', '<leader>btm', function() set_ft 'markdown' end, { desc = '[M]arkdown' })
+
+vim.keymap.set('n', '<leader>bt?', function()
+  vim.ui.input({
+    prompt = 'Set filetype: ',
+    default = vim.bo.filetype,
+  }, function(input)
+    if input and input ~= '' then set_ft(input) end
+  end)
+end, { desc = 'Prompt' })
+
+-- buffer deletion
+vim.keymap.set('n', '<leader>bdc', function() vim.cmd 'bd' end, { desc = '[C]urrent' })
+
+vim.keymap.set('n', '<leader>bda', function() vim.cmd '%bd|e#|bd#' end, { desc = '[A]ll' })
+
+-- [[ Yank clobbering ]]
+-- prevent yanking of d, c and x by prepending leader
+vim.keymap.set({ 'n', 'v' }, '<leader>d', '"_d', { desc = 'Delete without yanking' })
+vim.keymap.set({ 'n', 'v' }, '<leader>c', '"_c', { desc = 'Change without yanking' })
+vim.keymap.set({ 'n', 'v' }, '<leader>x', '"_x', { desc = 'Delete char without yanking' })
+-- prevent yanking when pasting in visual mode by prepending leader
+vim.keymap.set('v', '<leader>p', '"_dP', { desc = 'Paste without replacing yank' })
 
 -- The line beneath this is called `modeline`. See `:help modeline`
 -- vim: ts=2 sts=2 sw=2 et
